@@ -1,13 +1,13 @@
-// ignore_for_file: avoid_print
-
 import 'package:flutter/material.dart';
+import 'package:google_maps/model/place.dart';
+import 'package:google_maps/restaurantpage.dart';
+import 'package:google_maps/widgets/add_dialog.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:location/location.dart';
-import 'package:google_places_autocomplete_text_field/google_places_autocomplete_text_field.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 
 class Homepage extends StatefulWidget {
-  const Homepage({Key? key}) : super(key: key);
+  const Homepage({super.key});
 
   @override
   State<Homepage> createState() => _HomepageState();
@@ -23,6 +23,8 @@ class _HomepageState extends State<Homepage> {
   PolylinePoints polylinePoints = PolylinePoints();
   List<LatLng> polylineCoordinates = [];
   Set<Polyline> polylines = {};
+  List<Place> places = [];
+  bool _isAddingNewPlace = false;
 
   @override
   void initState() {
@@ -34,7 +36,6 @@ class _HomepageState extends State<Homepage> {
     var locationService = Location();
     currentLocation = await locationService.getLocation();
     setState(() {
-      currentLocation = currentLocation;
       _addMarker(
         LatLng(currentLocation!.latitude!, currentLocation!.longitude!),
         "Current Location",
@@ -116,7 +117,7 @@ class _HomepageState extends State<Homepage> {
           destination: PointLatLng(destination.latitude, destination.longitude),
           mode: TravelMode.driving,
         ),
-        googleApiKey: "AIzaSyC_QSwHlHXbLrprGX1NpXevP948eY8FtXM",
+        googleApiKey: "YOUR_GOOGLE_MAPS_API_KEY", // Replace with your API key
       );
     } catch (e) {
       print("Error fetching polyline: $e");
@@ -137,7 +138,7 @@ class _HomepageState extends State<Homepage> {
           polylineId: const PolylineId('poly'),
           color: Colors.blue,
           points: polylineCoordinates,
-          width: 3,
+          width: 6,
         );
 
         polylines.add(polyline);
@@ -146,25 +147,52 @@ class _HomepageState extends State<Homepage> {
   }
 
   void _handleMapTap(LatLng tappedPoint) {
-    if (currentLocation != null) {
-      setState(() {
-        markers.clear();
-        polylines.clear();
-
-        _addMarker(tappedPoint, "Destination", "Destination");
-
-        if (currentLocation != null) {
-          _getPolyline(
-            LatLng(currentLocation!.latitude!, currentLocation!.longitude!),
-            tappedPoint,
-          );
-        }
-
-        mapController.animateCamera(
-          CameraUpdate.newLatLng(tappedPoint),
-        );
-      });
+    if (_isAddingNewPlace) {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) => AddPlaceDialog(
+          onPlaceAdded: (Place newPlace) {
+            _addNewPlace(newPlace, tappedPoint);
+          },
+        ),
+      );
+    } else {
+      Marker tappedMarker = markers.firstWhere(
+        (marker) => marker.position == tappedPoint,
+        orElse: () => markers.first,
+      );
+      showDialog(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+          title: Text(tappedMarker.infoWindow.title!),
+          content: Text(
+              'You tapped on ${tappedMarker.infoWindow.title!}. Show more details here.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
     }
+  }
+
+  void _addNewPlace(Place newPlace, LatLng position) {
+    setState(() {
+      places.add(newPlace);
+      _addMarker(position, newPlace.name, newPlace.address);
+      _isAddingNewPlace = false;
+    });
+  }
+
+  void _navigateToPlace(LatLng destination) {
+    _getPolyline(
+      LatLng(currentLocation!.latitude!, currentLocation!.longitude!),
+      destination,
+    );
   }
 
   @override
@@ -206,41 +234,25 @@ class _HomepageState extends State<Homepage> {
                 ],
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                 child: Row(
                   children: [
-                    const Icon(Icons.search, color: Colors.grey),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: GooglePlacesAutoCompleteTextFormField(
-                        textEditingController: controller,
-                        googleAPIKey: "AIzaSyC_QSwHlHXbLrprGX1NpXevP948eY8FtXM",
-                        debounceTime: 400,
-                        isLatLngRequired: true,
-                        itmClick: (prediction) {
-                          if (prediction.lat != null &&
-                              prediction.lng != null) {
-                            controller.text = prediction.description!;
-                            controller.selection = TextSelection.fromPosition(
-                              TextPosition(
-                                offset: prediction.description!.length,
-                              ),
-                            );
-                            mapController.animateCamera(
-                              CameraUpdate.newLatLng(
-                                LatLng(
-                                  prediction.lat as double,
-                                  prediction.lng as double,
-                                ),
-                              ),
-                            );
-                            _handleMapTap(LatLng(
-                              prediction.lat as double,
-                              prediction.lng as double,
-                            ));
-                          }
-                        },
-                      ),
+                    IconButton(
+                      icon: const Icon(Icons.map),
+                      onPressed: _toggleMapType,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.my_location),
+                      onPressed: _goToMyLocation,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_location),
+                      onPressed: () {
+                        setState(() {
+                          _isAddingNewPlace = true;
+                        });
+                      },
                     ),
                   ],
                 ),
@@ -249,28 +261,29 @@ class _HomepageState extends State<Homepage> {
           ),
         ],
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton(
-            backgroundColor: Colors.white,
-            onPressed: _toggleMapType,
-            child: const Icon(
-              Icons.layers,
-              color: Colors.black,
-            ),
-          ),
-          const SizedBox(height: 10),
-          FloatingActionButton(
-            backgroundColor: Colors.white,
-            onPressed: _goToMyLocation,
-            child: const Icon(
-              Icons.location_on,
-              color: Colors.black,
-            ),
-          ),
+      bottomNavigationBar: BottomNavigationBar(
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.restaurant), label: 'Restaurants'),
         ],
+        onTap: (index) {
+          if (index == 1) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => RestaurantPage(
+                  places: places,
+                  currentLocation: LatLng(
+                    currentLocation!.latitude!,
+                    currentLocation!.longitude!,
+                  ),
+                  onNavigateToPlace: _navigateToPlace,
+                ),
+              ),
+            );
+          }
+        },
       ),
     );
   }
